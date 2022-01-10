@@ -1,0 +1,166 @@
+---
+title: "R Plotting Tutorial"
+author: "David Colameo"
+date: "13 10 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+# How To Load Data into R
+
+There are numerous ways of how to import datasets into R. You can prepare them in Excel and save them either as excel-files or csv-files.
+Other types of files are often also supported (txt, SQL-databases)
+
+Prepare your data into a nice format in excel and keep it simple. It is important to not put more than one table per sheet. There is no need to make manual adjustments on excel, since those are much easier to implement in R and take more often than not just one line of code.
+
+Lets start with a dummy qPCR-dataset, where the wells are labelled using the Plate-setup from the BioRad-program and then the results exported as excel-files
+
+```{r}
+
+##First lets import some packages, its good practice to import all needed packages at the beginning of the RMarkdown. So you can continuously add packages in this section as you write more and more code.
+
+library(readxl)
+
+## You should know where you saved your excel-file. I like to create a folder per markdown and save all related files in the same folder. You can find your file easier, you can use R-Studio auto-complete functionality by first writing "./" and then tab (|->) key on your keyboard.
+
+getwd()
+excelPath <- "./TaqMan_Cq_Data.xlsx"
+data <- read_excel(excelPath)
+
+##Lets convert the data-object into a data.frame-object
+data <- as.data.frame(data)
+
+
+##There is a lot of "junk" in the table, since I didnt modify it manually on excel and took it as it was exported from the BioRad-program
+## Lets clean it up a bit and select only the relevant columns and omit rows that are not complete (with NAs) because of empty wells
+
+cols <- c("Target", "Sample", "Biological Set Name", "Cq")
+data <- data[,cols]
+data <- data[complete.cases(data),]
+#Lets have a look
+head(data)
+
+```
+
+
+# Table manipulations
+
+Now that we have a clean table, we can start to modify it and add information to the table. For example, the triplicates are all stacked upon each other, we want to have them all in a row with columns like replicate1, replicate2, replicate3. Also RH stands for right hemisphere, LH stands for left hemispehere. I know that we injected into the RH always an LNA and a negative control (NC) into the left hemisphere except for Mouse 35. Another information to add is, M33 to M36 are injected with LNA218, M37 to M40 are injected with LNA129. These kind of manipulations heavily depends on how you organize your labelling of experiments and it is something you might need to change from analysis to analysis. Ofc if you find a system that works for you, try to keep it that way all the time to build a routine.
+
+
+### Lets add triplicates
+This section can be reused easily all the time
+
+```{r}
+
+library(reshape2)
+
+#Here we are creating a column with unique names except for the triplicates. 
+data$Group <- paste(data$Target, data$Sample, data$`Biological Set Name`, sep=".")
+
+unique(data$Group)
+
+##Lets add a new column Rep (for replicate) and then we will add in here whether a row is replicate 1, 2 or 3
+data$Rep = NA
+for(g in unique(data$Group)){
+  
+  data[data$Group == g,]$Rep <- paste("Rep", rep(1:nrow(data[data$Group == g,])), sep="")
+  
+}
+
+#lets check
+head(data)
+
+#Now lets transform our data from long format to wide format
+data <- dcast(data, Target + Sample + `Biological Set Name` ~ Rep, value.var = "Cq")
+
+head(data)
+
+##Voilà, looks much nicer now. You will notice how we have also a Rep5-6. This is the case, because during the pipetting of the qPCR I thought I did a pipetting error in one of the conditions, I added 3 more replicates for that condition
+
+data[complete.cases(data),]
+rowMeans(data[complete.cases(data),4:6])
+rowMeans(data[complete.cases(data),7:9])
+rowMeans(data[complete.cases(data),4:9])
+t.test(data[complete.cases(data),4:6], data[complete.cases(data),7:9])
+
+## Since it looks like the values of the 6 replicates are all very similar, we can do a mean of all 6 replicates
+
+##Now lets add a column meanCq with the means of all 3 replicates
+data$meanCq <- rowMeans(data[,4:9], na.rm = T)
+head(data)
+
+
+```
+
+
+
+## House-Keeping Gene
+
+Now lets add the values of the house-keeping gene. In this case it is U6. For that, we will split our data-table into two, one part with the genes of interest and the other half with the U6-values. Then we will merge those two tables back together column-wise (in the wide format). For splitting tables, subset is a useful-function
+
+```{r}
+
+##All genes except U6
+data.targets <- subset(data, Target != "U6")
+##Only U6
+data.u6 <- subset(data, Target == "U6")
+
+#lets merge those two tables according to Sample and Biological Set Name Column
+data <- merge(data.targets,data.u6 , suffixes = c(".tar", ".u6"), by=c("Sample", "Biological Set Name"))
+
+
+
+## Lets perform the delta Cq normalisation; which is subtracting meanCq of the targets from the meanCq of U6. This is equivalent to performing a division since we are in the log2-scale (2^Cq1 / 2^Cq2 -> Cq1 - Cq2 -> 2^(Cq1-Cq2))
+
+data$dCq <- data$meanCq.tar - data$meanCq.u6
+
+
+# You can also add the fold-change if you want
+
+data$Fold.dCq <- 2^ -(data$dCq)
+head(data)
+```
+
+
+
+
+### Lets add experiment-specific additional information
+
+```{r}
+
+
+## ifelse is a useful tool to add such information very efficiently. You can give a statement to the function and it will add a value to a new column if it is true or add another value if it isnt. This is equivalent as for-looping over every row and ask the question but much more efficient and faster.
+
+
+## if LH -> NC otherwise LNA
+data$LNA <- ifelse(data$`Biological Set Name` == "LH", "NC", "LNA")
+
+## First group of mice
+m1 <- c("M33", "M34", "M35", "M36")
+
+## If these mice belong to this group AND the hemisphere is right, lets add LNA218, otherwise the previous value (otherwise you will overwrite the NC you added before)
+data$LNA <- ifelse(data$Sample %in% m1 & data$`Biological Set Name` == "RH", "LNA218", data$LNA )
+
+## Same here with LNA129
+m2 <- c("M37", "M38", "M39", "M40")
+data$LNA <- ifelse(data$Sample %in% m2 & data$`Biological Set Name` == "RH", "LNA129", data$LNA )
+
+## Lets add a column to group the mice in either LNA218 or LNA129 injected mice
+data$Coort <- ifelse(data$Sample %in% m1, "Coort1 (LNA218)", "Coort2 (LNA129)")
+
+##Lets change the values for that one mouse that was injected differently
+data$LNA <- ifelse(data$Sample =="M35" & data$`Biological Set Name` == "RH", "NC", data$LNA)
+data$LNA <- ifelse(data$Sample =="M35" & data$`Biological Set Name` == "LH", "LNA218", data$LNA)
+
+head(data)
+
+```
+
+
+## Lets add 
+
+

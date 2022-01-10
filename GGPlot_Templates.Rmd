@@ -1,0 +1,205 @@
+---
+title: "GGplot Templates For The Schratt Lab"
+author: "David Colameo"
+date: "14 10 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+## Goals
+
+Create a common guideline to create publishing-ready and standardized plots for the Schrattlab. This markdown should continuously be supplemented, so suggestions are more than welcome.
+
+A useful website with cheatsheets for R coding in general can be found here: https://www.rstudio.com/resources/cheatsheets/
+
+
+### Styling
+
+Lets unify styling of plots and colors
+
+Create global variables that one can load before any plotting
+
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+```
+
+### Data
+
+Load a dummy dataset called iris There are many more built-in datasets (see data() for more information)
+
+This famous (Fisher's or Anderson's) iris data set gives the measurements in centimeters of the variables sepal length and width and petal length and width, respectively, for 50 flowers from each of 3 species of iris. The species are Iris setosa, versicolor, and virginica.
+
+iris is a data frame with 150 cases (rows) and 5 variables (columns) named Sepal.Length, Sepal.Width, Petal.Length, Petal.Width, and Species.
+
+```{r}
+head(iris)
+summary(iris)
+
+
+ag <- function(df, cols, fun=mean) {
+
+  df <- aggregate(df, by=as.list(df[,cols]), FUN=fun)
+  return(df[, colSums(is.na(df)) != nrow(df)])
+  
+  
+}
+
+```
+
+
+## Groundplot
+
+Lets define a groundplot and save it in the variable p, where we can add elements on top. Lets look at different styles here.
+
+```{r, fig1, fig.height = 10, fig.width = 10}
+
+
+p <- ggplot(iris, aes(x=Species, y=Sepal.Length, color = Species))  + 
+  ##adding dots here
+  geom_dotplot(aes(fill = Species), binaxis='y', stackdir='center', binwidth=1/30)
+
+ggarrange(
+p + theme_bw(),
+p + theme_classic(),
+p + theme_cleveland(),
+p + theme_dark(),
+p + theme_get(),
+p + theme_gray(),
+p + theme_light(),
+p + theme_pubr(),
+p + theme_linedraw(),
+p + theme_minimal(),
+p + theme_pubclean(),
+p + theme_transparent())
+
+```
+
+
+
+### Scatterplots
+
+Scatterplots should be used for n < 5. Mean + SD
+
+```{r}
+p + 
+  ##adding errorbars here
+  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+        geom="errorbar", color="black", width=0.2) +
+  ##adding mean crossbar here
+  stat_summary(fun=mean, geom="crossbar", color="black", width=0.3)
+```
+
+
+### Boxplots
+
+Boxplots for n>5
+
+```{r}
+
+p  + 
+  ##adding dots here
+  geom_dotplot(aes(fill = Species), binaxis='y', stackdir='center', binwidth=1/30) +
+  ##add boxplots here
+  geom_boxplot(alpha=0.4, aes(fill = Species))
+
+```
+
+
+### Correlation Plots
+
+Correlate two variables:
+
+If normal distributed use Pearson otherwise non-parametric Spearman
+
+(To be done: Styling should be adjusted to the rest of the plot)
+
+```{r}
+
+
+ggscatter(iris, x="Petal.Length", y="Sepal.Length", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "spearman")+ geom_point(size=3,aes(color=Species))
+
+```
+
+
+### Use more than variable
+
+Sometimes we want to plot more than one variable in one graph. For example, petal length and petal width. For this, we will transform the data in long format and use facet_grid to have more than one plot together.
+
+```{r}
+library(reshape2)
+
+long.dat <- reshape2::melt(iris, id.vars = "Species", measure.vars = c("Petal.Length", "Sepal.Length"))
+
+head(long.dat)
+
+ggplot(long.dat, aes(x=Species, y=value, color = Species, fill=Species))  + 
+  ##adding dots here
+    geom_dotplot(binaxis='y', stackdir='center', binwidth=1/30) + geom_boxplot(alpha=0.4) + facet_grid(~variable, scales = "free")
+
+```
+
+ or alternatively by changing from facet_grid from   ~ variable to variable ~ . 
+
+ 
+```{r}
+ggplot(long.dat, aes(x=Species, y=value, color = Species, fill=Species))  + 
+  ##adding dots here
+    geom_dotplot(binaxis='y', stackdir='center', binwidth=1/30) + geom_boxplot(alpha=0.4) + facet_grid(variable ~ ., scales = "free")
+
+```
+
+
+ 
+In other instances, you can also combine more than one grouping factor together like this:
+
+* variable.x ~ variable.y 
+* variable.x ~ variable.y ~ variable.z
+
+and to more fancy stuff:
+
+```{r}
+
+library(stringr)
+
+long.dat <- reshape2::melt(iris, id.vars = "Species")
+
+long.dat$Leaf <- sapply(as.character(long.dat$variable), FUN= function(x){
+  
+  unlist(str_split(x, pattern="\\."))[1]
+  
+}) 
+
+long.dat$Form <- sapply(as.character(long.dat$variable), FUN= function(x){
+  
+  unlist(str_split(x, pattern="\\."))[2]
+  
+}) 
+
+ggplot(long.dat, aes(x=Species, y=value, color = Species, fill=Species))  + 
+  ##adding dots here
+    geom_dotplot(binaxis='y', stackdir='center', binwidth=1/30) + geom_boxplot(alpha=0.4) + facet_grid(Leaf ~ Form, scales = "free")
+
+```
+
+
+
+### Grouping Inside a Single Plot
+
+Instead of having 4 separate plots, we can also put them all together in one plot using the aesthetic mapping "group".
+
+```{r}
+
+
+ggplot(long.dat, aes(x=Species, y=value, color = variable, fill=variable, group = interaction(variable, Species)))  + 
+  ##adding dots here
+    geom_dotplot(binaxis='y', stackdir='center', binwidth=1/30, position = position_dodge(0.75)) + geom_boxplot(alpha=0.4)
+
+```
+
+
