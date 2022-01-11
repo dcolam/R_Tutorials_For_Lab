@@ -1,4 +1,4 @@
-# R_Tutorials_For_Lab
+# R Tutorials For the Schratt Lab
 Short R Tutorials for common statistical analyses in the Schratt Lab
 
 Possible topics could include:
