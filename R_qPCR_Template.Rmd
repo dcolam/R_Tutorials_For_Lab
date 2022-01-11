@@ -1,5 +1,5 @@
 ---
-title: "R Plotting Tutorial"
+title: "R qPCR Template"
 author: "David Colameo"
 date: "13 10 2021"
 output: html_document
@@ -127,12 +127,9 @@ head(data)
 
 
 
-
 ### Lets add experiment-specific additional information
 
 ```{r}
-
-
 ## ifelse is a useful tool to add such information very efficiently. You can give a statement to the function and it will add a value to a new column if it is true or add another value if it isnt. This is equivalent as for-looping over every row and ask the question but much more efficient and faster.
 
 
@@ -147,6 +144,10 @@ data$LNA <- ifelse(data$Sample %in% m1 & data$`Biological Set Name` == "RH", "LN
 
 ## Same here with LNA129
 m2 <- c("M37", "M38", "M39", "M40")
+```
+
+
+```{r}
 data$LNA <- ifelse(data$Sample %in% m2 & data$`Biological Set Name` == "RH", "LNA129", data$LNA )
 
 ## Lets add a column to group the mice in either LNA218 or LNA129 injected mice
@@ -161,6 +162,183 @@ head(data)
 ```
 
 
-## Lets add 
+## Plots the Data
+
+There is a separate in-depth tutorial on how to plot data properly. Using those templates we can create following plot. We have the measured miRNA (miR129 or miR218 in the X-axis and -dCq in the y-axis (normalized to U6)) We can furhter divide the plot in two using the Coort-column as factor in facet_grid. Plus, we need a boxplot for the right and left hemisphere (LNA vs Negative Control Injection) which we can achieve using the grouping-aesthetic. 
+
+```{r}
+library(ggplot2)
+
+p <- ggplot(data, aes(x=Target.tar, y=-dCq, color=Sample, fill=LNA, group= interaction(LNA, Target.tar)))  + 
+  geom_boxplot(alpha=0.3, aes(fill=LNA))+
+  
+  geom_point(aes(color=Sample), alpha=0.8, position = position_dodge(0.75), size=3) + facet_grid(.~Coort, scales="free")
+
+  
+  # ##adding dots here
+  # geom_dotplot(aes(fill=Sample, color=Sample), binaxis='y', stackdir='center', binwidth=1/7,  position = position_dodge(0.75)) + facet_grid(.~Coort, scales="free")
+
+
+p
+
+
+```
+
+## Statistics
+There will be a whole section about statistics. For this kind of analysis, we will employ an ANOVA using the mouse-factor as blocking, so we can compare the effect of the LNA within a subject (mouse). Afterwards, we will perform a post-hoc analysis using the emmeans-package. We can also compare the data if we tranform it to the fold-change to see if we get the same results
+
+```{r}
+library(emmeans)
+
+
+mod <- aov(-dCq ~ LNA*Target.tar + Sample, data)
+summary(mod)
+
+##There is no effect of the sample, which is good. There is no obvious mouse-outlier. Plus, we have an effect for the target (meaning that miR129 and miR218 levels are different) and there is an effect of LNA (LNA does something). Also, there is an interaction between targets and LNA, meaning the LNAs have specific effects (LNA218 vs LNA129)
+
+
+##Now the contrasts, LNA-effect within a target (made possible by | command)
+emmeans(mod, pairwise ~ LNA | Target.tar)
+
+## We only see differences, if we manipulate the miRNA we are measuring.
+
+##We can also build two separate models, one per coort
+
+
+
+mod <- aov(-dCq ~ LNA*Target.tar, subset(data, Coort== "Coort1 (LNA218)"))
+summary(mod)
+
+
+emmeans(mod, pairwise ~ LNA | Target.tar)
+
+
+
+mod <- aov(-dCq ~ LNA*Target.tar, subset(data, Coort== "Coort2 (LNA129)"))
+summary(mod)
+
+emmeans(mod, pairwise ~ LNA | Target.tar)
+
+
+
+
+```
+
+
+
+## Classical ddCq Approach
+
+What if we want to perform a classical ddCQ analysis. Again, a ddCq is nothing else than a division in the log-transform scale, meaning we need to subtract a condition by a control. In our case, we first normalized to a house-keeping gene and now we add a second layer of normalization, which is the LNA-effect vs negative control. Again, we can split the data into two and then re-merge them:
+
+
+
+```{r}
+
+## %in% is used if we have a condition with more than one matching condition (instead of concatenating twice the same statement)
+lna <- subset(data, LNA %in% c("LNA218", "LNA129"))
+ctrl <- subset(data, LNA == "NC")
+
+## We will merge the two tables according to mouse and coort, which will make sure that we are pairing the right negative controls with the right condition
+
+ddCq.data <- merge(lna, ctrl, suffixes = c(".lna", ".ctrl"), by=c("Sample", "Coort", "Target.tar"))
+
+head(ddCq.data)
+
+## Now we have a rather wide data.frame. At this point we could also clip the data a bit and omit useless columns. Or we keep just going. We just need to add a normalized ddCq column
+
+ddCq.data$ddCq <- ddCq.data$dCq.lna - ddCq.data$dCq.ctrl
+ddCq.data$fold.ddCq <- 2^- ddCq.data$ddCq
+
+
+```
+
+
+
+
+## Lets Plot the ddCq and Fold-change
+
+We will add a dashed line at the intercept for 0 and 1, respectively, indicating no change.
+
+```{r}
+
+p <- ggplot(ddCq.data, aes(x=Target.tar, y=-ddCq, group= Target.tar))  + 
+geom_boxplot(alpha=0.4, aes(fill=Target.tar))+
+  
+  geom_point(aes(color=Sample), alpha=0.8, position = position_dodge(0.75), size=3) + facet_grid(.~Coort, scales="free")
+
+
+
+
+p+ geom_hline(yintercept = 0, linetype="dashed")
+
+p <- ggplot(ddCq.data, aes(x=Target.tar, y=fold.ddCq,group= Target.tar))   + 
+geom_boxplot(alpha=0.4, aes(fill=Target.tar))+
+  
+  geom_point(aes(color=Sample), alpha=0.8, position = position_dodge(0.75), size=3) + facet_grid(.~Coort, scales="free")
+
+
+
+
+p + geom_hline(yintercept = 1, linetype="dashed")
+
+
+
+```
+
+
+## Statistics
+
+
+Similarly, we will perform an ANOVA, plus a one-sample t-test to test if our changes are different from 0.
+
+```{r}
+
+
+mod <- aov(-ddCq ~ Coort*Target.tar, ddCq.data)
+
+summary(mod)
+
+emmeans(mod, pairwise ~ Target.tar | Coort)
+## Does it make sense to compare miR129 to miR218? not really, but depending on your experimental setup, this could make sense.
+
+mod <- aov(fold.ddCq ~ Coort*Target.tar, ddCq.data)
+
+summary(mod)
+
+emmeans(mod, pairwise ~ Target.tar | Coort)
+## Completely different results if we use fold-change values! Be aware of that.
+
+
+
+
+##One sample T-test
+library(dplyr)
+library(rstatix)
+
+
+ddCq.data$ddCq <- -1 * ddCq.data$ddCq
+paired.TTest <- ddCq.data %>% group_by(Coort, Target.tar) %>% t_test(ddCq ~ 1, mu=0)
+
+## we need to adjust the p-values for multiple testing
+paired.TTest$p.adjusted <- p.adjust(paired.TTest$p, method = "hochberg")
+paired.TTest
+
+## Lost significance after multiple correction
+
+
+## How does the fold-change look like
+paired.TTest <- ddCq.data %>% group_by(Coort, Target.tar) %>% t_test(fold.ddCq ~ 1, mu=1)
+
+## we need to adjust the p-values for multiple testing
+paired.TTest$p.adjusted <- p.adjust(paired.TTest$p, method = "hochberg")
+paired.TTest
+
+## A little better, we got significance for the miR129 condition
+
+
+
+```
+
+
 
 
