@@ -1,18 +1,43 @@
 ---
-title: "R qPCR Template"
+title: "R qPCR Tutorial"
 author: "David Colameo"
-date: "13 10 2021"
+date: "16 02 2022"
 output: html_document
 editor_options: 
   chunk_output_type: console
 ---
 
 
+# Installing Needed Packages
+
+We will need several packages in this tutorial. The function pkgTest checks if the packages are already installed and if it is, it will be loaded on your environment. You can add or delete packages in the packages-vector if you want to reuse this section.
+
+```{r}
+pkgTest <- function(x)
+  {
+    if (!require(x,character.only = TRUE))
+    {
+      install.packages(x,dep=TRUE)
+        if(!require(x,character.only = TRUE)) stop("Package not found")
+    }
+  }
+
+packages <- c("readxl", "reshape2", "ggplot2", "ggpubr", "dplyr", "rstatix", "lme4", "lmerTest", "emmeans")
+
+
+for(package in packages){
+  pkgTest(package)
+}
+
+
+```
+
+
 
 # How To Load Data into R
 
 There are numerous ways of how to import datasets into R. You can prepare them in Excel and save them either as excel-files or csv-files.
-Other types of files are often also supported (txt, SQL-databases)
+Other types of files are often also supported (txt, SQL-databases).
 
 Prepare your data into a nice format in excel and keep it simple. It is important to not put more than one table per sheet. There is no need to make manual adjustments on excel, since those are much easier to implement in R and take more often than not just one line of code.
 
@@ -20,13 +45,8 @@ Lets start with a dummy qPCR-dataset, where the wells are labelled using the Pla
 
 ```{r}
 
-##First lets import some packages, its good practice to import all needed packages at the beginning of the RMarkdown. So you can continuously add packages in this section as you write more and more code.
-
-library(readxl)
-
 ## You should know where you saved your excel-file. I like to create a folder per markdown and save all related files in the same folder. You can find your file easier, you can use R-Studio auto-complete functionality by first writing "./" and then tab (|->) key on your keyboard.
 
-getwd()
 excelPath <- "./TaqMan_Cq_Data.xlsx"
 data <- read_excel(excelPath)
 
@@ -55,8 +75,6 @@ Now that we have a clean table, we can start to modify it and add information to
 This section can be reused easily all the time
 
 ```{r}
-
-library(reshape2)
 
 #Here we are creating a column with unique names except for the triplicates. 
 data$Group <- paste(data$Target, data$Sample, data$`Biological Set Name`, sep=".")
@@ -129,6 +147,8 @@ head(data)
 
 ### Lets add experiment-specific additional information
 
+This section is heavily dependent on your dataset and how you organize your information.
+
 ```{r}
 ## ifelse is a useful tool to add such information very efficiently. You can give a statement to the function and it will add a value to a new column if it is true or add another value if it isnt. This is equivalent as for-looping over every row and ask the question but much more efficient and faster.
 
@@ -144,10 +164,7 @@ data$LNA <- ifelse(data$Sample %in% m1 & data$`Biological Set Name` == "RH", "LN
 
 ## Same here with LNA129
 m2 <- c("M37", "M38", "M39", "M40")
-```
 
-
-```{r}
 data$LNA <- ifelse(data$Sample %in% m2 & data$`Biological Set Name` == "RH", "LNA129", data$LNA )
 
 ## Lets add a column to group the mice in either LNA218 or LNA129 injected mice
@@ -162,74 +179,204 @@ head(data)
 ```
 
 
-## Plots the Data
+## Plot the Data
 
-There is a separate in-depth tutorial on how to plot data properly. Using those templates we can create following plot. We have the measured miRNA (miR129 or miR218 in the X-axis and -dCq in the y-axis (normalized to U6)) We can furhter divide the plot in two using the Coort-column as factor in facet_grid. Plus, we need a boxplot for the right and left hemisphere (LNA vs Negative Control Injection) which we can achieve using the grouping-aesthetic. 
+There is a separate in-depth tutorial on how to plot data properly. Using those templates we can create following plot. We have the measured miRNA (miR129 or miR218 in the X-axis and -dCq in the y-axis (normalized to U6)) We can further divide the plot in two using the Coort-column as factor in facet_grid. Plus, we need a boxplot for the right and left hemisphere (LNA vs Negative Control Injection) which we can achieve using the grouping-aesthetic. 
 
 ```{r}
-library(ggplot2)
 
-p <- ggplot(data, aes(x=Target.tar, y=-dCq, color=Sample, fill=LNA, group= interaction(LNA, Target.tar)))  + 
+p <- ggplot(data, aes(x=Coort, y=-dCq, color=Sample, fill=LNA, group= interaction(LNA, Coort)))  + 
   geom_boxplot(alpha=0.3, aes(fill=LNA))+
   
-  geom_point(aes(color=Sample), alpha=0.8, position = position_dodge(0.75), size=3) + facet_grid(.~Coort, scales="free")
-
-  
-  # ##adding dots here
-  # geom_dotplot(aes(fill=Sample, color=Sample), binaxis='y', stackdir='center', binwidth=1/7,  position = position_dodge(0.75)) + facet_grid(.~Coort, scales="free")
-
+  geom_point(aes(color=Sample), alpha=0.8, position = position_dodge(0.75), size=3) + facet_grid(. ~ Target.tar, scales="free")
 
 p
 
 
 ```
 
-## Statistics
-There will be a whole section about statistics. For this kind of analysis, we will employ an ANOVA using the mouse-factor as blocking, so we can compare the effect of the LNA within a subject (mouse). Afterwards, we will perform a post-hoc analysis using the emmeans-package. We can also compare the data if we tranform it to the fold-change to see if we get the same results
+### Exercise for the fast ones
+
+  1. Create a different plot where we have the microRNA on the x-axis and the two plots are split according to Coort-factor.
+          - Which of the two kind of plots make more sense?
+          
+  2. Create a plot with the fold-changes in the y-axis using your preferred arrangement in the x-axis.
+          - Tipp: use facet_wrap instead of facet_grid. Can you find out why?
+
+
+#Statistics
+
+In this section, we are going to perform some statistical analysis. There are many ways of doing this and there will be a more in-depth seminar on just ANOVAs and linear mixed models.
+
+
+## ANOVA Assumptions
+
+First we need to consider which test we want to use. For this, we need to make sure, we are meeting the ANOVA-assumptions.
+
+We have one factor for which we want to test the effect: Does a specific LNA inhibit the measured microRNA? This means, we are considering a one-way ANOVA.
+
+The assumptions for an ANOVA are:
+  1. Experimental errors (residuals) are normally distributed (-> data does not necessarily need to be normally distributed)
+  2. Equal variances between treatments (sphericity assumption)
+  3. Independence of samples
+  
+
+The first two assumptions we can test visually (QQ-Plots) and with corresponding tests (Shapiro-Wilk normality test). The third assumption is based on your experimental design. In most of our cases in the lab, we don't meet this assumption, since primary cultures are dependent from each other (genetically identical cells). Or in our case, we have repeated measurements within a mouse (hemisphere and levels of miR218/miR129). These factors are dependent from each other. We will take into account dependency into the model by including the mouse-ID into the model.
+
+
+### Normality Test
+
+We will test normality with the Shapirp-Wilk test. The null-hypothesis is that the data is normally distributed. A p-value < 0.05 means, we reject the null-hypothesis -> the data is most likely not normally distributed.
 
 ```{r}
-library(emmeans)
+
+## Lets perform some descriptive statistics (number of samples per group, mean and standard deviation)
+
+data %>%
+  ## here we split our data by group. You will need to change this bit to your experimental setup
+  group_by(LNA, Target.tar, Coort) %>%
+  
+  ## check with help(get_summary_stats) for more extensive options of summaries
+  get_summary_stats(c(dCq, Fold.dCq), type = "common")
 
 
-mod <- aov(-dCq ~ LNA*Target.tar + Sample, data)
-summary(mod)
-
-##There is no effect of the sample, which is good. There is no obvious mouse-outlier. Plus, we have an effect for the target (meaning that miR129 and miR218 levels are different) and there is an effect of LNA (LNA does something). Also, there is an interaction between targets and LNA, meaning the LNAs have specific effects (LNA218 vs LNA129)
-
-
-##Now the contrasts, LNA-effect within a target (made possible by | command)
-emmeans(mod, pairwise ~ LNA | Target.tar)
-
-## We only see differences, if we manipulate the miRNA we are measuring.
-
-##We can also build two separate models, one per coort
+## Here we perform the Shapiro-Wilk normality test by splitting the data in groups
+data %>%
+  group_by(LNA, Target.tar, Coort) %>%
+  shapiro_test(dCq) %>%
+ add_significance("p")
 
 
-
-mod <- aov(-dCq ~ LNA*Target.tar, subset(data, Coort== "Coort1 (LNA218)"))
-summary(mod)
-
-
-emmeans(mod, pairwise ~ LNA | Target.tar)
+## Here we perform the Shapiro-Wilk normality test by splitting the data in groups
+data %>%
+  group_by(LNA, Target.tar, Coort) %>%
+  ##Lets take the fold changes here instead of dCq
+  shapiro_test(Fold.dCq) %>%
+ add_significance("p")
 
 
 
-mod <- aov(-dCq ~ LNA*Target.tar, subset(data, Coort== "Coort2 (LNA129)"))
-summary(mod)
+ggqqplot(data, "dCq", ggtheme = theme_bw()) +
+  facet_grid(LNA ~ Target.tar, labeller = "label_both") + labs(title="QQ-Plots of group-splitted dCq values")
 
-emmeans(mod, pairwise ~ LNA | Target.tar)
-
-
+## A QQ-plot probably does not make a lot of sense with n=4 per group. However, it still follows the expected trendline quite nicely.
 
 
 ```
+
+
+## ANOVA Statistics
+Technically, we are not allowed to use a classical ANOVA to model our data, since our experimental design does not meet the 3rd requirement. For educational purposes, we will implement both analyses. If we put together in the same model LNA effects and gene effect, then we are performing a two-way ANOVA. Since we are using a multiplicative model (denoted by the * sign instead of a + sign) we can check for interaction-effects between LNA and gene-expression. This will also allow us later to perform contrasts on all levels. 
+
+## Classical ANOVA
+```{r}
+## This command performs the ANOVA analysis and stores it in the variable mod (you can name it as you want ofc)
+mod <- aov(-dCq ~ LNA*Target.tar, data)
+summary(mod)
+
+#lets test the normality of the residuals of our model
+
+shapiro.test(residuals(mod))
+ggqqplot(residuals(mod))
+```
+
+### Contrasting between Condition
+
+In order to contrast the differences between conditions, we will perform a Dunnett's Test (via the trt.vs.ctrl command) where we specify NC as the control group. We can also perform a Tukey's test, where we do pairwise comparisons across all combinations (less power since we are performing more tests)
+
+```{r}
+##Now the contrasts, LNA-effect within a target (made possible by | command)
+emmeans(mod, trt.vs.ctrl ~ LNA | Target.tar, ref="NC")
+
+## Or Tukeys pairwise comparison test
+
+emmeans(mod, pairwise ~ LNA | Target.tar)
+
+```
+
+## Repeated Measure ANOVA
+
+All we need to do to perform a repeated measure ANOVA is add the term Error(Sample) where sample is the ID for the mice. The function residual does not work here and we need to extract them manually as seen below:
+
+Do you note a difference in the results?
+
+```{r}
+## The Error(Sample)-term denotes the within subject dependence and this is how you would implement a repeated measure ANOVA
+mod <- aov(-dCq ~ LNA*Target.tar + Error(Sample), data)
+summary(mod)
+
+#lets test the normality of the residuals of our model
+res <- proj(mod)                                                                  
+res <- res[[3]][, "Residuals"]
+shapiro.test(res)
+ggqqplot(res)
+```
+
+### Same principle for the contrasts
+
+
+```{r}
+##Now the contrasts, LNA-effect within a target (made possible by | command)
+emmeans(mod, trt.vs.ctrl ~ LNA | Target.tar, ref="NC")
+
+## Or Tukeys pairwise comparison test
+
+emmeans(mod, pairwise ~ LNA | Target.tar)
+
+```
+
+
+
+## Linear Mixed Model
+
+We will have a separate seminar on linear mixed models and nesting structures later. This is just a short introduction to show you how it is done and how easy it is to implement in R. The random-effect term is determined by the (1|Sample)- term inside the lmer-function
+
+```{r}
+mod <- lmer(-dCq ~ LNA*Target.tar +  (1|Sample), data)
+summary(mod)
+
+
+##Now the contrasts, LNA-effect within a target (made possible by | command)
+emmeans(mod, trt.vs.ctrl ~ LNA | Target.tar, ref="NC")
+
+## Or Tukeys pairwise comparison test
+
+emmeans(mod, pairwise ~ LNA | Target.tar)
+```
+
+
+## Perform Paired T-Tests
+
+What if we want to perform paired t-tests instead of ANOVAs? That's how you would do it. Of course, we need to correct for multiple testing:
+
+```{r}
+
+data$dCq <- -1*data$dCq
+t.tests <- data %>% 
+  ## We group here according to miRNA-levels and Coort
+  group_by(Target.tar, Coort) %>% 
+  ## We perform the t-test here, where paired is set as TRUE
+    t_test(dCq ~ LNA, paired = T) 
+
+## Add multiple testing correction, there are many. You can check a few, but the results are all similar -> no comparison passes the multiple correction
+t.tests$p.adj <-  p.adjust(t.tests$p, method="fdr")
+
+
+t.tests <- add_significance(t.tests, p.col="p.adj")
+
+t.tests
+
+```
+
+### Exercise
+
+Perform an unpaired t-test -> does the data change? And why?
 
 
 
 ## Classical ddCq Approach
 
 What if we want to perform a classical ddCQ analysis. Again, a ddCq is nothing else than a division in the log-transform scale, meaning we need to subtract a condition by a control. In our case, we first normalized to a house-keeping gene and now we add a second layer of normalization, which is the LNA-effect vs negative control. Again, we can split the data into two and then re-merge them:
-
 
 
 ```{r}
@@ -253,11 +400,9 @@ ddCq.data$fold.ddCq <- 2^- ddCq.data$ddCq
 ```
 
 
+## Lets Plot the ddCq
 
-
-## Lets Plot the ddCq and Fold-change
-
-We will add a dashed line at the intercept for 0 and 1, respectively, indicating no change.
+We will add a dashed line at the intercept for 0, indicating no change (log(0) = 1 because x^0 = 1)
 
 ```{r}
 
@@ -271,73 +416,66 @@ geom_boxplot(alpha=0.4, aes(fill=Target.tar))+
 
 p+ geom_hline(yintercept = 0, linetype="dashed")
 
-p <- ggplot(ddCq.data, aes(x=Target.tar, y=fold.ddCq,group= Target.tar))   + 
-geom_boxplot(alpha=0.4, aes(fill=Target.tar))+
-  
-  geom_point(aes(color=Sample), alpha=0.8, position = position_dodge(0.75), size=3) + facet_grid(.~Coort, scales="free")
-
-
-
-
-p + geom_hline(yintercept = 1, linetype="dashed")
-
-
 
 ```
 
+### Exercise
+
+Create a plot with the fold-changes in the y-axis. Change also the intercept to an appropriate number.
 
 ## Statistics
 
+With the knowledge
 
-Similarly, we will perform an ANOVA, plus a one-sample t-test to test if our changes are different from 0.
+
+Similarly, we will perform an one-way ANOVA.
 
 ```{r}
-
-
-mod <- aov(-ddCq ~ Coort*Target.tar, ddCq.data)
+mod <- aov(-ddCq ~ Coort*Target.tar + Error(Sample), ddCq.data)
 
 summary(mod)
 
 emmeans(mod, pairwise ~ Target.tar | Coort)
 ## Does it make sense to compare miR129 to miR218? not really, but depending on your experimental setup, this could make sense.
 
-mod <- aov(fold.ddCq ~ Coort*Target.tar, ddCq.data)
-
-summary(mod)
-
-emmeans(mod, pairwise ~ Target.tar | Coort)
-## Completely different results if we use fold-change values! Be aware of that.
+```
 
 
+## One Sample T-test
 
+We could also perform a one sample t-tests per condition checking whether the effect of introducing an LNA elicited a change. The mu will be 0, since our null-hypothesis is no change hence 0. 
 
+What should mu be if we dont perform the t-test in the log2-scale?
+
+```{r}
 ##One sample T-test
-library(dplyr)
-library(rstatix)
 
 
 ddCq.data$ddCq <- -1 * ddCq.data$ddCq
-paired.TTest <- ddCq.data %>% group_by(Coort, Target.tar) %>% t_test(ddCq ~ 1, mu=0)
+
+
+one.sample.TTest <- ddCq.data %>% 
+                  group_by(Coort, Target.tar) %>% 
+                      ##Here we define mu = 0
+                            t_test(ddCq ~ 1, mu=0)
 
 ## we need to adjust the p-values for multiple testing
-paired.TTest$p.adjusted <- p.adjust(paired.TTest$p, method = "hochberg")
-paired.TTest
+one.sample.TTest$p.adjusted <- p.adjust(one.sample.TTest$p, method = "fdr")
 
-## Lost significance after multiple correction
+one.sample.TTest <- add_significance(one.sample.TTest, p.col="p.adjusted")
 
-
-## How does the fold-change look like
-paired.TTest <- ddCq.data %>% group_by(Coort, Target.tar) %>% t_test(fold.ddCq ~ 1, mu=1)
-
-## we need to adjust the p-values for multiple testing
-paired.TTest$p.adjusted <- p.adjust(paired.TTest$p, method = "hochberg")
-paired.TTest
-
-## A little better, we got significance for the miR129 condition
-
-
+one.sample.TTest
 
 ```
+
+
+Did you notice how these results are EXACTLY the same as the paired two-sample t-test we performed earlier? Why do you think?
+
+
+## Exercise for you
+
+Try to write a r-markdown script with one of your qPCR-datasets and analyze it using this tutorial as a template. You can send it to me for corrections and suggestions
+
 
 
 
